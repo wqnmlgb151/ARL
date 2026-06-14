@@ -1,90 +1,138 @@
-import subprocess
-import shlex
-import random
-import string
-import psutil
-import os
-import re
-import sys
-import hashlib
-from celery.utils.log import get_task_logger
-import colorlog
+# -*- coding: utf-8 -*-
+"""
+ARL 工具函数模块（轻量级入口）
+
+本模块仅提供 re-export 功能，具体实现分布在：
+- app/utils/db.py: 数据库访问
+- app/utils/system.py: 系统工具
+- app/utils/network.py: 网络工具
+- app/utils/parsers.py: 解析工具（域名、URL、证书等）
+
+推荐用法：
+    # 数据库访问
+    from app.utils.db import conn_db, init_db
+
+    # 系统工具
+    from app.utils.system import exec_system, check_output
+
+    # 网络工具
+    from app.utils.network import domain_parsed, get_ip, get_fld
+
+    # 解析工具
+    from app.utils.parsers import parse_domain, parse_url
+"""
+
+# ============================================================================
+# 数据库访问（从 db.py re-export）
+# ============================================================================
+from app.utils.db import conn_db, get_db, init_db
+
+# ============================================================================
+# 系统工具（从 system.py re-export）
+# ============================================================================
+from app.utils.system import (
+    exec_system,
+    check_output,
+    kill_child_process,
+    exit_gracefully,
+    is_valid_exclude_ports,
+    random_choices,
+)
+
+# ============================================================================
+# 网络工具（从 network.py re-export）
+# ============================================================================
+from app.utils.network import (
+    domain_parsed,
+    get_ip,
+    get_fld,
+    gen_filename,
+)
+
+# ============================================================================
+# 解析工具（从 parsers.py re-export）
+# ============================================================================
+from app.utils.parsers import (
+    build_ret,
+    get_domain,
+    get_ip_from_domain,
+)
+
+# ============================================================================
+# 字符串工具（从 string_utils.py re-export）
+# ============================================================================
+from app.utils.string_utils import truncate_string, gen_md5
+
+# ============================================================================
+# 文件工具（从 file_utils.py re-export）
+# ============================================================================
+from app.utils.file_utils import (
+    load_file,
+    save_file,
+    append_file,
+    read_file_content,
+    write_file_content,
+)
+
+# ============================================================================
+# 路径常量（从 path_utils.py re-export）
+# ============================================================================
+from app.utils.path_utils import (
+    BASE_DIR,
+    DICTS_DIR,
+    TOOLS_DIR,
+    TMP_DIR,
+    SCREENSHOT_DIR,
+)
+
+# ============================================================================
+# 类型定义（从 type_defs.py re-export）
+# ============================================================================
+from app.utils.type_defs import (
+    IPAddress,
+    DomainName,
+    PortNumber,
+    URL,
+    TaskStatus,
+    SchedulerStatus,
+    TaskType,
+    AssetScopeType,
+)
+
+# ============================================================================
+# 日志工具
+# ============================================================================
 import logging
-import dns.resolver
-from tld import get_tld
-from .conn import http_req, conn_db
-from .http import get_title, get_headers
-from .domain import check_domain_black, is_valid_domain, is_in_scope, is_in_scopes, is_valid_fuzz_domain
-from .ip import is_vaild_ip_target, not_in_black_ips, get_ip_asn, get_ip_city, get_ip_type
-from .arl import arl_domain, get_asset_domain_by_id
-from .time import curr_date, time2date, curr_date_obj
-from .url import rm_similar_url, get_hostname, normal_url, same_netloc, verify_cert, url_ext
-from .cert import get_cert
-from .arlupdate import arl_update
-from .cdn import get_cdn_name_by_cname, get_cdn_name_by_ip
-from .device import device_info
-from .cron import check_cron, check_cron_interval
-from .query_loader import load_query_plugins
-import re
+import sys
 
-def load_file(path):
-    with open(path, "r+", encoding="utf-8") as f:
-        return f.readlines()
+try:
+    from celery.utils.log import get_task_logger
+except ImportError:
+    def get_task_logger(name):
+        return logging.getLogger(name)
 
-
-def exec_system(cmd, **kwargs):
-    cmd = " ".join(cmd)
-    timeout = 4 * 60 * 60
-
-    if kwargs.get('timeout'):
-        timeout = kwargs['timeout']
-        kwargs.pop('timeout')
-
-    completed = subprocess.run(shlex.split(cmd), timeout=timeout, check=False, close_fds=True, **kwargs)
-
-    return completed
-
-
-def check_output(cmd, **kwargs):
-    cmd = " ".join(cmd)
-    timeout = 4 * 60 * 60
-
-    if kwargs.get('timeout'):
-        timeout = kwargs.pop('timeout')
-
-    if 'stdout' in kwargs:
-        raise ValueError('stdout argument not allowed, it will be overridden.')
-
-    output = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, timeout=timeout, check=False,
-               **kwargs).stdout
-    return output
-
-
-def random_choices(k=6):
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=k))
-
-
-def gen_md5(s):
-    return hashlib.md5(s.encode()).hexdigest()
+import colorlog
 
 
 def init_logger():
+    """初始化日志记录器"""
     handler = colorlog.StreamHandler()
     handler.setFormatter(colorlog.ColoredFormatter(
-        fmt = '%(log_color)s[%(asctime)s] [%(levelname)s] '
-              '[%(threadName)s] [%(filename)s:%(lineno)d] %(message)s', datefmt = "%Y-%m-%d %H:%M:%S"))
+        fmt='%(log_color)s[%(asctime)s] [%(levelname)s] '
+             '[%(threadName)s] [%(filename)s:%(lineno)d] %(message)s',
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
 
     logger = colorlog.getLogger('arlv2')
-
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
     logger.propagate = False
 
 
 def get_logger():
+    """获取日志记录器"""
     if 'celery' in sys.argv[0]:
-        task_logger = get_task_logger(__name__)
-        return task_logger
+        return get_task_logger(__name__)
 
     logger = logging.getLogger('arlv2')
     if not logger.handlers:
@@ -93,146 +141,34 @@ def get_logger():
     return logging.getLogger('arlv2')
 
 
-def get_ip(domain, log_flag=True):
-    domain = domain.strip()
-    logger = get_logger()
-    ips = []
-    try:
-        answers = dns.resolver.resolve(domain, 'A')
-        for rdata in answers:
-            if rdata.address == '0.0.0.1':
-                continue
-            ips.append(rdata.address)
-    except dns.resolver.NXDOMAIN as e:
-        if log_flag:
-            logger.info("{} {}".format(domain, e))
+# ============================================================================
+# 向后兼容导入（将在后续版本中移除）
+# ============================================================================
+import os
+import subprocess
+import shlex
+import hashlib
+import re
+from typing import List, Dict, Any, Optional, Tuple, Union
 
-    except Exception as e:
-        if log_flag:
-            logger.warning("{} {}".format(domain, e))
-
-    return ips
+# 这些导入保留用于向后兼容，新代码应直接导入具体模块
+from app.utils.sanitizer import MongoSanitizer, sanitize_input
+from app.utils.user import verify_password, hash_password
+from app.utils.domain import is_valid_domain
+from app.utils.url import normal_url, get_hostname
 
 
-def get_cname(domain, log_flag=True):
-    logger = get_logger()
-    cnames = []
-    try:
-        answers = dns.resolver.resolve(domain, 'CNAME')
-        for rdata in answers:
-            cnames.append(str(rdata.target).strip(".").lower())
-    except dns.resolver.NoAnswer as e:
-        if log_flag:
-            logger.debug(e)
-    except Exception as e:
-        logger.warning("{} {}".format(domain, e))
+# 延迟导入 http_req 避免循环依赖
+def __getattr__(name):
+    if name in ('http_req', 'http_client'):
+        from app.utils.conn import http_req, http_client
+        if name == 'http_req':
+            return http_req
+        return http_client
+    raise AttributeError(f"module 'app.utils' has no attribute {name}")
 
-    return cnames
-
-
-def domain_parsed(domain, fail_silently=True):
-    domain = domain.strip()
-    try:
-        res = get_tld(domain, fix_protocol=True,  as_object=True)
-        item = {
-            "subdomain": res.subdomain,
-            "domain":res.domain,
-            "fld": res.fld
-        }
-        return item
-    except Exception as e:
-        if not fail_silently:
-            raise e
-
-
-def get_fld(d):
-    """获取域名的主域"""
-    res = domain_parsed(d)
-    if res:
-        return res["fld"]
-
-
-def gen_filename(site):
-    filename = site.replace('://', '_')
-
-    return re.sub(r'[^\w\-_\\. ]', '_', filename)
-
-
-def build_ret(error, data):
-    if isinstance(error, str):
-        error = {
-            "message": error,
-            "code": 999,
-        }
-
-    ret = {}
-    ret.update(error)
-    ret["data"] = data
-    msg = error["message"]
-
-    if error["code"] != 200:
-        for k in data:
-            if k.endswith("id"):
-                continue
-            if not data[k]:
-                continue
-            if isinstance(data[k], str):
-                msg += " {}:{}".format(k, data[k])
-
-    ret["message"] = msg
-    return ret
-
-
-def kill_child_process(pid):
-    logger = get_logger()
-    parent = psutil.Process(pid)
-    for child in parent.children(recursive=True):
-        logger.info("kill child_process {}".format(child))
-        child.kill()
-
-
-def exit_gracefully(signum, frame):
-    logger = get_logger()
-    logger.info('Receive signal {} frame {}'.format(signum, frame))
-    pid = os.getpid()
-    kill_child_process(pid)
-    parent = psutil.Process(pid)
-    logger.info("kill self {}".format(parent))
-    parent.kill()
-
-
-def truncate_string(s):
-    if len(s) > 30:
-        truncated_string = s[:30]
-        return truncated_string + "..."
-    else:
-        return s
-
-
-def is_valid_exclude_ports(exclude_ports):
-    """
-    检查 nmap 中的排除端口范围是否合法
-    """
-    port_pattern = r'(\d+(-\d+)?,?)+'
-
-    match = re.fullmatch(port_pattern, exclude_ports)
-
-    if match:
-        parts = exclude_ports.split(',')
-        for part in parts:
-            if '-' in part:
-                start, end = map(int, part.split('-'))
-                if start > end or not (0 <= start <= 65535) or not (0 <= end <= 65535):
-                    return False
-            else:
-                if not (0 <= int(part) <= 65535):
-                    return False
-        return True
-    else:
-        return False
-
-
-from .user import user_login, user_login_header, auth, user_logout, change_pass
-from .push import message_push
-from .fingerprint import parse_human_rule, transform_rule_map
-
+# Windows 编码修复
+if sys.platform == 'win32' and 'pytest' not in sys.modules:
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
