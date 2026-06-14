@@ -31,17 +31,37 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
+def is_md5_hash(hashed: str) -> bool:
+    """
+    检测是否为 MD5 哈希（32 字符 hex）
+
+    Args:
+        hashed: 哈希字符串
+
+    Returns:
+        是否为 MD5 格式
+    """
+    import re
+    # MD5 是 32 字符的十六进制字符串
+    return bool(re.match(r'^[a-f0-9]{32}$', hashed.lower()))
+
+
 def verify_password(password: str, hashed: str) -> bool:
     """
-    验证密码（仅支持 bcrypt）
+    验证密码（支持 bcrypt，拒绝 MD5）
 
     Args:
         password: 明文密码
         hashed: 哈希后的密码
 
     Returns:
-        是否匹配
+        是否匹配（MD5 哈希返回 False，强制用户重置密码）
     """
+    # 拒绝 MD5 哈希（强制用户重置密码）
+    if is_md5_hash(hashed):
+        logger.warning(f"MD5 password detected, forcing password reset")
+        return False
+
     try:
         return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
     except (ValueError, TypeError):
@@ -56,7 +76,7 @@ def generate_token() -> str:
 
 def user_login(username=None, password=None):
     """
-    用户登录
+    用户登录（检测 MD5 用户并拒绝登录，强制密码重置）
 
     Args:
         username: 用户名
@@ -64,6 +84,7 @@ def user_login(username=None, password=None):
 
     Returns:
         用户信息字典，登录失败返回 None
+        如果需要密码重置，返回 {"password_reset_required": True}
     """
     if not username or not password:
         return None
@@ -75,11 +96,20 @@ def user_login(username=None, password=None):
     if len(username) > 50 or len(password) > 128:
         return None
 
-    # 查询用户
-    hashed_password = hash_password(password)
-    query = {"username": username, "password": hashed_password}
+    # 查询用户（先查找用户名）
+    user = _get_conn_db()('user').find_one({"username": username})
+    if not user:
+        return None
 
-    if _get_conn_db()('user').find_one(query):
+    stored_password = user.get('password', '')
+
+    # 检测 MD5 哈希（强制重置）
+    if is_md5_hash(stored_password):
+        logger.warning(f"MD5 password detected for user {username}, login rejected")
+        return {"password_reset_required": True, "username": username}
+
+    # 使用 bcrypt 验证
+    if bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8')):
         # 生成安全令牌
         token = generate_token()
         expires_at = datetime.utcnow() + timedelta(hours=24)
@@ -91,7 +121,7 @@ def user_login(username=None, password=None):
             "expires_at": expires_at
         }
         _get_conn_db()('user').update_one(
-            query,
+            {"username": username},
             {"$set": {"token": token, "expires_at": expires_at}}
         )
 
@@ -212,6 +242,75 @@ def validate_password_strength(password: str) -> bool:
     if not any(c.isdigit() for c in password):
         return False
     return True
+
+
+def reset_password(username: str, new_password: str) -> bool:
+    """
+    重置密码（用于 MD5 迁移）
+
+    Args:
+        username: 用户名
+        new_password: 新明文密码
+
+    Returns:
+        是否重置成功
+    """
+    # 验证新密码强度
+    if not validate_password_strength(new_password):
+        return False
+
+    # 使用 UserRepository（如果可用）
+    try:
+        from app.database.repositories import UserRepository
+        repo = UserRepository()
+        user = repo.find_by_username(username)
+        if user:
+            hashed = hash_password(new_password)
+            return repo.update_one(
+                {'username': username},
+                {'$set': {'password': hashed, 'password_reset_required': False}}
+            )
+    except Exception as e:
+        logger.error(f"UserRepository not available: {e}")
+
+    # 回退到直接数据库访问
+    hashed = hash_password(new_password)
+    result = _get_conn_db()('user').update_one(
+        {'username': username},
+        {'$set': {'password': hashed, 'password_reset_required': False}}
+    )
+    return result.modified_count > 0
+
+
+def check_password_reset_required(username: str) -> bool:
+    """
+    检查用户是否需要重置密码（MD5 用户）
+
+    Args:
+        username: 用户名
+
+    Returns:
+        是否需要重置密码
+    """
+    try:
+        from app.database.repositories import UserRepository
+        repo = UserRepository()
+        user = repo.find_by_username(username)
+        if user:
+            # 检查是否为 MD5 哈希
+            if is_md5_hash(user.get('password', '')):
+                return True
+            # 检查是否被标记为需要重置
+            if user.get('password_reset_required', False):
+                return True
+    except Exception as e:
+        logger.error(f"UserRepository not available: {e}")
+
+    # 回退到直接数据库访问
+    user = _get_conn_db()('user').find_one({'username': username})
+    if user and is_md5_hash(user.get('password', '')):
+        return True
+    return False
 
 
 import functools
