@@ -53,8 +53,17 @@ class Config(object):
     AUTH = False
     API_KEY = ""
 
-    # BLACK_IPS = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "0.0.0.0/8"]
-    BLACK_IPS = ["127.0.0.0/8", "0.0.0.0/8"]
+    # SSRF 防护：禁止的 IP 范围（内网和保留地址）
+    BLACK_IPS = [
+        "127.0.0.0/8",      # Loopback
+        "10.0.0.0/8",       # Private Class A
+        "172.16.0.0/12",    # Private Class B
+        "192.168.0.0/16",   # Private Class C
+        "169.254.0.0/16",   # Link-local
+        "0.0.0.0/8",        # Invalid/broadcast
+        "224.0.0.0/4",      # Multicast
+        "240.0.0.0/4",      # Reserved
+    ]
 
     GEOIP_ASN = ""
     GEOIP_CITY = ""
@@ -98,7 +107,7 @@ class Config(object):
 
 
 try:
-    with open(os.path.join(basedir, 'config.yaml')) as f:
+    with open(os.path.join(basedir, 'config.yaml'), encoding='utf-8') as f:
         y = yaml.load(f, Loader=yaml.SafeLoader)
 
     Config.MONGO_URL = y["MONGO"]["URI"]
@@ -229,6 +238,20 @@ try:
         if y["WXWORK"].get("WEBHOOK_URL"):
             Config.WX_WORK_WEBHOOK = y["WXWORK"]["WEBHOOK_URL"]
 
+except FileNotFoundError:
+    # Config file not found is a fatal error - fail fast
+    print(f"Configuration file not found: {os.path.join(basedir, 'config.yaml')}")
+    sys.exit(1)
+except yaml.YAMLError as e:
+    # YAML parsing error - fail fast with clear message
+    print(f"Invalid YAML in config.yaml: {e}")
+    sys.exit(1)
+except KeyError as e:
+    # Missing required config key
+    print(f"Missing required configuration key: {e}")
+    sys.exit(1)
 except Exception as e:
-    print("Parse config.yaml error {}".format(e))
-    sys.exit(-1)
+    # Unexpected error - log full traceback before exiting
+    import logging
+    logging.getLogger(__name__).exception(f"Unexpected error loading config.yaml: {e}")
+    sys.exit(1)
