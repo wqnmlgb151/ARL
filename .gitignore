@@ -99,6 +99,10 @@ tmp_capture/
 .idea/
 
 config.yaml
+.env
+*.pem
+*.key
+*.secret
 supervisord.conf
 
 node_modules/
@@ -127,3 +131,7 @@ node_modules
 docker/image/
 docker/arl_web.log
 docker/arl_worker.log
+
+# Claude Code
+.claude/
+CLAUDE.md

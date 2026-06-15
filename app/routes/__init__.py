@@ -1,12 +1,15 @@
 import re
+import hashlib
+import json
 from flask_restx import Resource, reqparse, fields
 from bson.objectid import ObjectId
 from datetime import datetime
 from urllib.parse import quote
-from flask import make_response
+from flask import make_response, request
 import time
 
 from app.utils import conn_db as conn
+from app.services.cache_service import multi_level_cache, CACHE_STRATEGIES
 
 base_query_fields = {
     'page': fields.Integer(description="当前页数", example=1),
@@ -53,6 +56,9 @@ class ARLResource(Resource):
 
             if key.endswith("__dgt"):
                 real_key = key.split('__dgt')[0]
+                # 验证字段名只包含字母、数字和下划线，防止注入
+                if not re.match(r'^[a-zA-Z0-9_]+$', real_key):
+                    continue
                 raw_value = query_args.get(real_key, {})
                 raw_value.update({
                     "$gt": datetime.strptime(args[key],
@@ -62,6 +68,9 @@ class ARLResource(Resource):
 
             elif key.endswith("__dlt"):
                 real_key = key.split('__dlt')[0]
+                # 验证字段名只包含字母、数字和下划线，防止注入
+                if not re.match(r'^[a-zA-Z0-9_]+$', real_key):
+                    continue
                 raw_value = query_args.get(real_key, {})
                 raw_value.update({
                     "$lt": datetime.strptime(args[key],
@@ -71,6 +80,9 @@ class ARLResource(Resource):
 
             elif key.endswith("__neq"):
                 real_key = key.split('__neq')[0]
+                # 验证字段名只包含字母、数字和下划线，防止注入
+                if not re.match(r'^[a-zA-Z0-9_]+$', real_key):
+                    continue
                 raw_value = {
                     "$ne": args[key]
                 }
@@ -78,6 +90,9 @@ class ARLResource(Resource):
 
             elif key.endswith("__not"):
                 real_key = key.split('__not')[0]
+                # 验证字段名只包含字母、数字和下划线，防止注入
+                if not re.match(r'^[a-zA-Z0-9_]+$', real_key):
+                    continue
                 raw_value = {
                     "$not": re.compile(re.escape(args[key]))
                 }
@@ -85,12 +100,18 @@ class ARLResource(Resource):
 
             elif key.endswith("__gt") and isinstance(args[key], int):
                 real_key = key.split('__gt')[0]
+                # 验证字段名只包含字母、数字和下划线，防止注入
+                if not re.match(r'^[a-zA-Z0-9_]+$', real_key):
+                    continue
                 raw_value = {
                     "$gt": args[key]
                 }
                 query_args[real_key] = raw_value
             elif key.endswith("__lt") and isinstance(args[key], int):
                 real_key = key.split('__lt')[0]
+                # 验证字段名只包含字母、数字和下划线，防止注入
+                if not re.match(r'^[a-zA-Z0-9_]+$', real_key):
+                    continue
                 raw_value = {
                     "$lt": args[key]
                 }
@@ -129,8 +150,16 @@ class ARLResource(Resource):
         size = default_field.get("size", 10)
         orderby_list = default_field.get('order', [("_id", -1)])
         query = self.build_db_query(args)
+
+        # 读取缓存（仅 GET 请求，避免缓存脏数据）
+        if request.method == 'GET':
+            cache_key = self._cache_key(collection, query, page, size, orderby_list)
+            cached = multi_level_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         result = conn(collection).find(query).sort(orderby_list).skip(size * (page - 1)).limit(size)
-        count = conn(collection).count(query)
+        count = conn(collection).count_documents(query)
         items = self.build_return_items(result)
 
         special_keys = ["_id", "save_date", "update_date"]
@@ -152,7 +181,21 @@ class ARLResource(Resource):
             "query": query,
             "code": 200
         }
+
+        # 写入缓存（GET 请求）
+        if request.method == 'GET':
+            strategy = CACHE_STRATEGIES.get('task_result', {})
+            multi_level_cache.set(cache_key, data,
+                                  ttl=strategy.get('ttl', 60),
+                                  l1_ttl=strategy.get('l1_ttl', 30))
+
         return data
+
+    @staticmethod
+    def _cache_key(collection, query, page, size, orderby_list):
+        """生成查询缓存键"""
+        raw = f"{collection}:{str(query)}:{page}:{size}:{str(orderby_list)}"
+        return f"query:{hashlib.md5(raw.encode()).hexdigest()[:16]}"
 
     '''
     取默认字段的值，并且删除

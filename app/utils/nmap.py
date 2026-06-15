@@ -321,7 +321,8 @@ class PortScanner(object):
 
         try:
             dom = ET.fromstring(self._nmap_last_output)
-        except Exception:
+        except ET.ParseError as e:
+            # XML parsing failed - nmap output was not valid XML
             if len(nmap_err) > 0:
                 raise PortScannerError(nmap_err)
             else:
@@ -782,7 +783,10 @@ class PortScannerAsync(object):
         """
         try:
             return self._process.is_alive()
-        except:
+        except Exception as e:
+            # Log the exception but don't crash - process might have terminated unexpectedly
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to check nmap process status: {e}")
             return False
 
 

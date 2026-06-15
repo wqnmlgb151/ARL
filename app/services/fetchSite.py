@@ -2,7 +2,15 @@ import time
 from pyquery import PyQuery as pq
 import binascii
 from urllib.parse import urljoin, urlparse
-from urllib3.util.url import parse_url, get_host
+try:
+    from urllib3.util.url import parse_url, get_host
+except ImportError:
+    # urllib3 >= 2.0 removed get_host
+    from urllib3.util.url import parse_url
+
+    def get_host(parsed_url):
+        """Extract hostname from parsed URL."""
+        return parsed_url.hostname or parsed_url.netloc
 import mmh3
 from app import utils
 from .baseThread import BaseThread

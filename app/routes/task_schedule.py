@@ -90,6 +90,8 @@ class ARLTaskScheduleResult(ARLResource):
                 target = " ".join(targets)
 
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
 
         data = {
@@ -118,6 +120,8 @@ class ARLTaskScheduleResult(ARLResource):
                 data["next_run_date"] = start_date
                 data["cron"] = ""
             except Exception as e:
+                import logging
+                logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
                 return utils.build_ret(ErrorMsg.DateInvalid, {"start_date": start_date})
 
         # 周期任务处理

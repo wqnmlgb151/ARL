@@ -111,8 +111,10 @@ class PortScan:
         return {}
 
 
-def port_scan(targets, ports=Config.TOP_10, service_detect=False, os_detect=False,
+def port_scan(targets, ports=None, service_detect=False, os_detect=False,
               port_parallelism=32, port_min_rate=64, custom_host_timeout=None, exclude_ports=None):
+    if ports is None:
+        ports = Config.TOP_10
     targets = list(set(targets))
     targets = list(filter(utils.not_in_black_ips, targets))
     ps = PortScan(targets=targets, ports=ports, service_detect=service_detect, os_detect=os_detect,

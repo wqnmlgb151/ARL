@@ -1,5 +1,6 @@
 import json
-from app.utils import get_title, http_req, get_logger
+from app.utils.http import get_title
+from app.utils import http_req, get_logger
 from .baseThread import BaseThread, thread_map
 from requests.exceptions import ConnectTimeout, ReadTimeout
 import difflib

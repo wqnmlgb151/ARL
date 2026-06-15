@@ -105,6 +105,8 @@ def run_plugin(p, target) -> (str, list):
         return source_name, results
 
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
         error_str = str(e)
         if "please set fofa key" in error_str:
             logger.debug(error_str)

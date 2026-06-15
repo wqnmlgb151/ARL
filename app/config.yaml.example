@@ -7,6 +7,13 @@ MONGO:
   URI : 'mongodb://127.0.0.1:27017/'
   DB : 'arl'
 
+# Redis缓存配置（可选）
+REDIS:
+  HOST: "localhost"
+  PORT: 6379
+  DB: 0
+  PASSWORD: ""
+
 
 
 # 利用三方API进行域名收集

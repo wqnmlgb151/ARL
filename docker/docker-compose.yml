@@ -3,6 +3,8 @@ version: '3'
 volumes:
   arl_db:
     external: true
+  arl_redis:
+    external: true
 
 services:
     web:
@@ -12,6 +14,7 @@ services:
         depends_on:
           - mongodb
           - rabbitmq
+          - redis
         ports:
           #http 服务，默认不映射出来
           #- "5003:80"
@@ -21,10 +24,12 @@ services:
           - ./config-docker.yaml:/code/app/config.yaml
           - ./image:/code/app/tmp_screenshot
           - ./poc:/opt/ARL-NPoC/xing/plugins/upload_poc
-        entrypoint: ["sh", "-c", "gen_crt.sh; nginx; wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5003 app.main:arl_app -w 3 --access-logfile arl_web.log --access-logformat '%({x-real-ip}i)s %(l)s %(u)s %(t)s \"%(r)s\" %(s)s %(b)s \"%(f)s\" \"%(a)s\"'"]
+        entrypoint: ["sh", "-c", "gen_crt.sh; nginx; wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; wait-for-it.sh redis:6379; gunicorn -b 0.0.0.0:5003 app.main:arl_app -w 3 --access-logfile arl_web.log --access-logformat '%({x-real-ip}i)s %(l)s %(u)s %(t)s \"%(r)s\" %(s)s %(b)s \"%(f)s\" \"%(a)s\"'"]
         environment:
           - LANG=en_US.UTF-8
           - TZ=Asia/Shanghai
+          - REDIS_HOST=redis
+          - REDIS_PORT=6379
 
     worker:
         image: tophant/arl:${ARL_VERSION:-latest}
@@ -33,18 +38,21 @@ services:
         depends_on:
           - mongodb
           - rabbitmq
+          - redis
         volumes:
           - ./arl_worker.log:/code/arl_worker.log
           - ./config-docker.yaml:/code/app/config.yaml
           - ./image:/code/app/tmp_screenshot
           - ./poc:/opt/ARL-NPoC/xing/plugins/upload_poc
-        entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672;
+        entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; wait-for-it.sh redis:6379;
         celery -A app.celerytask.celery worker -l info -Q arlgithub -n arlgithub -c 2 -O fair -f arl_worker.log &
          celery -A app.celerytask.celery worker -l info -Q arltask -n arltask -c 2 -O fair -f arl_worker.log"]
 
         environment:
           - LANG=en_US.UTF-8
           - TZ=Asia/Shanghai
+          - REDIS_HOST=redis
+          - REDIS_PORT=6379
 
     scheduler:
       image: tophant/arl:${ARL_VERSION:-latest}
@@ -81,6 +89,24 @@ services:
         - RABBITMQ_DEFAULT_PASS=arlpassword
         - RABBITMQ_DEFAULT_USER=arl
         - RABBITMQ_DEFAULT_VHOST=arlv2host
+      logging:
+        driver: "json-file"
+        options:
+          max-size: "1M"
+          max-file: "10"
+
+    redis:
+      image: redis:7-alpine
+      container_name: arl_redis
+      restart: always
+      volumes:
+        - arl_redis:/data
+      command: redis-server --appendonly yes --requirepass ""
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
       logging:
         driver: "json-file"
         options:

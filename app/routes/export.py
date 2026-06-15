@@ -1,20 +1,39 @@
 #coding: utf-8
 
-from flask import  make_response
-from flask_restx import Resource, Namespace
-from openpyxl import Workbook
-from bson import ObjectId
+import json
 import re
 from collections import Counter
-from openpyxl.writer.excel import save_virtual_workbook
-from openpyxl.styles import Font, Color
-from app.utils import get_logger, auth
-from app import utils
 from urllib.parse import quote
+
+from flask import make_response, request
+from flask_restx import Resource, Namespace
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.writer.excel import save_virtual_workbook
+
+from app.utils import get_logger, auth
+from app.database.repositories import TaskRepository, IPRepository, SiteRepository, DomainRepository
 
 ns = Namespace('export', description="任务报告导出接口")
 
 logger = get_logger()
+
+# 仓库实例（模块级单例，所有导出请求复用）
+task_repo = TaskRepository()
+ip_repo = IPRepository()
+site_repo = SiteRepository()
+domain_repo = DomainRepository()
+
+# 支持的导出格式
+_EXPORT_FORMATS = {
+    'xlsx': None,  # 在模块末尾延迟注册
+    'json': None,
+}
+
+
+def register_format(name, writer):
+    """注册导出格式（插件扩展点）"""
+    _EXPORT_FORMATS[name] = writer
 
 
 @ns.route('/<string:task_id>')
@@ -22,46 +41,47 @@ class ARLExport(Resource):
     @auth
     def get(self, task_id):
         """
-        报告导出
+        报告导出（支持 ?format=xlsx|json 参数）
         """
+        export_format = request.args.get('format', 'xlsx')
+        if export_format not in _EXPORT_FORMATS:
+            return {"error": f"Unsupported format: {export_format}. Use: {', '.join(_EXPORT_FORMATS)}"}, 400
+
         task_data = get_task_data(task_id)
         if not task_data:
             return "not found"
 
         domain = task_data["target"].replace("/", "_")[:20]
-        filename = "ARL资产导出报告_{}.xlsx".format(domain)
+        ext = {'xlsx': 'xlsx', 'json': 'json'}.get(export_format, export_format)
+        filename = "ARL资产导出报告_{}.{}".format(domain, ext)
 
-        excel_data = export_arl(task_id)
-        response = make_response(excel_data)
-        response.headers['Content-Type'] = 'application/octet-stream'
+        writer = _EXPORT_FORMATS[export_format]
+        data, content_type = writer(task_data, task_id)
+
+        response = make_response(data)
+        response.headers['Content-Type'] = content_type
         response.headers["Content-Disposition"] = "attachment; filename={}".format(quote(filename))
-
         return response
-
-
 
 
 def get_task_data(task_id):
     try:
-        task_data = utils.conn_db('task').find_one({'_id': ObjectId(task_id)})
-        return task_data
+        return task_repo.find_by_id(task_id)
     except Exception as e:
-        pass
+        import logging
+        logging.getLogger(__name__).error(f"Failed to get task data for task_id={task_id}: {e}")
 
 
 def get_ip_data(task_id):
-    data =  utils.conn_db('ip').find({'task_id': task_id})
-    return data
+    return ip_repo.find_by_task(task_id)
 
 
 def get_site_data(task_id):
-    data = utils.conn_db('site').find({'task_id': task_id})
-    return data
+    return site_repo.find_by_task(task_id)
 
 
 def get_domain_data(task_id):
-    data = utils.conn_db('domain').find({'task_id': task_id})
-    return data
+    return domain_repo.find_by_task(task_id)
 
 
 def port_service_product_statist(task_id):
@@ -364,7 +384,7 @@ class SaveTask(object):
     def run(self):
         task_data = get_task_data(self.task_id)
         if not task_data:
-            print("not found {}".format(self.task_id))
+            logger.warning("Export task not found: %s", self.task_id)
             return
 
         domain = task_data["target"].replace("/", "_")[:20]
@@ -390,3 +410,68 @@ def export_arl(task_id):
     task_id = task_id.strip()
     save = SaveTask(task_id)
     return save.run()
+
+
+# -- 导出格式写入器 --
+
+def _write_xlsx(task_data, task_id):
+    """XLSX 格式导出（保持兼容 export_arl）"""
+    task_id = task_id.strip()
+    save = SaveTask(task_id)
+    data = save.run()
+    return data, 'application/octet-stream'
+
+
+def _write_json(task_data, task_id):
+    """JSON 格式导出"""
+    ip_list = list(get_ip_data(task_id))
+    domain_list = list(get_domain_data(task_id))
+    site_list = list(get_site_data(task_id))
+    statist = port_service_product_statist(task_id)
+
+    result = {
+        'task': {
+            'name': task_data.get('name', ''),
+            'target': task_data.get('target', ''),
+            'status': task_data.get('status', ''),
+        },
+        'statistics': statist,
+        'ips': _serialize_list(ip_list),
+        'domains': _serialize_list(domain_list),
+        'sites': _serialize_list(site_list),
+    }
+    data = json.dumps(result, ensure_ascii=False, default=str, indent=2)
+    return data.encode('utf-8'), 'application/json'
+
+
+def _serialize_list(items):
+    """将 MongoDB ObjectId 转换为字符串"""
+    from bson import ObjectId
+    result = []
+    for item in items:
+        serialized = {}
+        for k, v in item.items():
+            if isinstance(v, ObjectId):
+                serialized[k] = str(v)
+            elif isinstance(v, list):
+                serialized[k] = [_serialize_value(x) for x in v]
+            elif isinstance(v, dict):
+                serialized[k] = {kk: _serialize_value(vv) for kk, vv in v.items()}
+            else:
+                serialized[k] = v
+        result.append(serialized)
+    return result
+
+
+def _serialize_value(v):
+    from bson import ObjectId
+    if isinstance(v, ObjectId):
+        return str(v)
+    if isinstance(v, dict):
+        return {kk: _serialize_value(vv) for kk, vv in v.items()}
+    return v
+
+
+# 注册导出格式（新格式通过 register_format('name', writer_func) 添加即可）
+_EXPORT_FORMATS['xlsx'] = _write_xlsx
+_EXPORT_FORMATS['json'] = _write_json

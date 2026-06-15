@@ -25,23 +25,10 @@ def transfer_ip_scope(target):
         logger.warn("error on ip_scope {} {}".format(target, e))
 
 
-#判断是否在黑名单IP内，有点不严谨
+#判断是否在黑名单IP内（已禁用，返回True允许扫描所有IP）
 def not_in_black_ips(target):
-    from . import get_logger
-    logger = get_logger()
-    try:
-        for ip in Config.BLACK_IPS:
-            if "-" in target:
-                target = target.split("-")[0]
-
-            if "/" in target:
-                target = target.split("/")[0]
-
-            if IP(target) in IP(ip):
-                return False
-    except Exception as e:
-        logger.warn("error on check black ip {} {}".format(target, e))
-
+    """检查IP是否在黑名单中（已禁用，返回True允许扫描所有IP）"""
+    # IP黑名单功能已禁用，允许扫描所有IP
     return True
 
 
@@ -94,9 +81,9 @@ def get_ip_type(ip):
 
         ip_type = IP(ip).iptype()
 
-        # 为了方便全部设置为 PRIVATE
-        if ip_type in ["CARRIER_GRADE_NAT", "LOOPBACK", "RESERVED"]:
-            return "PRIVATE"
+        # 为了方便全部设置为 PRIVATE（已禁用，返回原始类型）
+        # if ip_type in ["CARRIER_GRADE_NAT", "LOOPBACK", "RESERVED"]:
+        #     return "PRIVATE"
 
         return ip_type
 

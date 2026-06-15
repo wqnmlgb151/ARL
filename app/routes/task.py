@@ -122,8 +122,6 @@ class ARLTask(ARLResource):
         }
         return ret
 
-        # return utils.build_ret(ErrorMsg.Success, {"items": task_data_list})
-
 
 batch_stop_fields = ns.model('BatchStop',  {
     "task_id": fields.List(fields.String(description="任务 ID"), required=True),
@@ -431,6 +429,8 @@ class TaskRestart(ARLResource):
                 restart_task(task_id)
 
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
 
         return utils.build_ret(ErrorMsg.Success, {"task_id": task_id_list})

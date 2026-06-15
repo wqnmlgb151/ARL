@@ -6,10 +6,29 @@ import hashlib
 import smtplib, ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from app.utils import http_req, get_logger
 from app.config import Config
 
-logger = get_logger()
+# 延迟导入，避免循环依赖（app.utils -> app.utils.push -> app.utils）
+_http_req = None
+_logger = None
+
+
+def _get_http_req():
+    """延迟导入http_req，避免循环依赖"""
+    global _http_req
+    if _http_req is None:
+        from app.utils import http_req
+        _http_req = http_req
+    return _http_req
+
+
+def _get_logger():
+    """延迟导入get_logger，避免循环依赖"""
+    global _logger
+    if _logger is None:
+        from app.utils import get_logger as _get_logger_func
+        _logger = _get_logger_func()
+    return _logger
 
 
 class Push(object):
@@ -107,7 +126,7 @@ class Push(object):
         ding_out = dingding_send(msg=tpl, access_token=Config.DINGDING_ACCESS_TOKEN,
                                  secret=Config.DINGDING_SECRET, msgtype="markdown")
         if ding_out["errcode"] != 0:
-            logger.warning("发送失败 \n{}\n {}".format(tpl, ding_out))
+            _get_logger().warning("发送失败 \n{}\n {}".format(tpl, ding_out))
             return False
         return True
 
@@ -125,7 +144,7 @@ class Push(object):
         tpl = "{}\n{}".format(tpl, dict2dingding_mark(self.site_info_list))
         ding_out = wx_work_send(msg=tpl, webhook_url=Config.WX_WORK_WEBHOOK)
         if ding_out["errcode"] != 0:
-            logger.warning("发送失败 \n{}\n {}".format(tpl, ding_out))
+            _get_logger().warning("发送失败 \n{}\n {}".format(tpl, ding_out))
             return False
         return True
 
@@ -143,7 +162,7 @@ class Push(object):
         feishu_out = feishu_send(msg=tpl, webhook_url=Config.FEISHU_WEBHOOK,
                                  secret=Config.FEISHU_SECRET)
         if feishu_out["code"] != 0:
-            logger.warning("发送失败 \n{}\n {}".format(tpl[:50], feishu_out))
+            _get_logger().warning("发送失败 \n{}\n {}".format(tpl[:50], feishu_out))
             return False
         return True
 
@@ -174,42 +193,42 @@ class Push(object):
         try:
             if Config.DINGDING_ACCESS_TOKEN and Config.DINGDING_SECRET:
                 if self._push_dingding():
-                    logger.info("push dingding succ")
+                    _get_logger().info("push dingding succ")
                     return True
 
         except Exception as e:
-            logger.warning(self.task_name, e)
+            _get_logger().warning(f"{self.task_name}: {e}")
 
     def push_email(self):
         try:
             if Config.EMAIL_HOST and Config.EMAIL_USERNAME and Config.EMAIL_PASSWORD:
                 self._push_email()
-                logger.info("send email succ")
+                _get_logger().info("send email succ")
                 return True
         except Exception as e:
-            logger.warning(self.task_name, e)
+            _get_logger().warning(f"{self.task_name}: {e}")
 
     def push_feishu(self):
         try:
             if Config.FEISHU_WEBHOOK and Config.FEISHU_SECRET:
                 self._push_feishu()
-                logger.info("send feishu succ")
+                _get_logger().info("send feishu succ")
                 return True
         except Exception as e:
-            logger.warning(self.task_name, e)
+            _get_logger().warning(f"{self.task_name}: {e}")
 
     def push_wx_work(self):
         try:
             if Config.WX_WORK_WEBHOOK:
                 self._push_wx_work()
-                logger.info("send wx work succ")
+                _get_logger().info("send wx work succ")
                 return True
         except Exception as e:
-            logger.warning(self.task_name, e)
+            _get_logger().warning(f"{self.task_name}: {e}")
 
 
 def message_push(asset_map, asset_counter):
-    logger.info("ARL push run")
+    _get_logger().info("ARL push run")
     p = Push(asset_map=asset_map, asset_counter=asset_counter)
     p.push_dingding()
     p.push_email()
@@ -252,7 +271,7 @@ def dingding_send(msg, access_token, secret, msgtype="text", title="灯塔消息
             "text": msg
         }
     }
-    conn = http_req(ding_url, method='post', json=send_json)
+    conn = _get_http_req()(ding_url, method='post', json=send_json)
     return conn.json()
 
 
@@ -333,7 +352,7 @@ def feishu_send(msg, webhook_url, secret, title="灯塔消息推送"):
             }
         }
     }
-    conn = http_req(webhook_url, method='post', json=send_data)
+    conn = _get_http_req()(webhook_url, method='post', json=send_data)
     return conn.json()
 
 
@@ -344,5 +363,5 @@ def wx_work_send(msg, webhook_url):
             "content": msg
         }
     }
-    conn = http_req(webhook_url, method='post', json=send_data)
+    conn = _get_http_req()(webhook_url, method='post', json=send_data)
     return conn.json()

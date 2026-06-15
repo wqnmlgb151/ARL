@@ -63,6 +63,8 @@ class ARLAssetDomain(ARLResource):
         try:
             _, domain_list = get_ip_domain_list(raw_domain)
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
 
         scope_data = utils.conn_db('asset_scope').find_one({"_id": ObjectId(scope_id)})

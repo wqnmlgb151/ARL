@@ -153,9 +153,10 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 
 # 这些导入保留用于向后兼容，新代码应直接导入具体模块
 from app.utils.sanitizer import MongoSanitizer, sanitize_input
-from app.utils.user import verify_password, hash_password
-from app.utils.domain import is_valid_domain
+from app.utils.user import verify_password, hash_password, auth
+from app.utils.domain import is_valid_domain, check_domain_black
 from app.utils.url import normal_url, get_hostname
+from app.utils.http import get_title
 
 
 # 延迟导入 http_req 避免循环依赖
@@ -167,8 +168,4 @@ def __getattr__(name):
         return http_client
     raise AttributeError(f"module 'app.utils' has no attribute {name}")
 
-# Windows 编码修复
-if sys.platform == 'win32' and 'pytest' not in sys.modules:
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# Windows 编码修复已移至 app/main.py（开发服务器入口）

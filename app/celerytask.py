@@ -42,7 +42,8 @@ def sigterm_handler(signum, frame):
         elif routing_key == CeleryRoutingKey.GITHUB_TASK:
             utils.conn_db('github_task').update_one(query, update_data)
     except Exception as e:
-        logger.error(f"update celery_id:{celery_id} status error: {e}")
+        # Log error but don't prevent graceful shutdown - process is terminating anyway
+        logger.error(f"update celery_id:{celery_id} status error: {e}", exc_info=True)
 
     utils.exit_gracefully(signum, frame)
 
@@ -77,7 +78,10 @@ def run_task(options):
         else:
             logger.warning("not found {} action".format(action))
     except Exception as e:
-        logger.exception(e)
+        # Log full traceback for task execution failures - critical for debugging
+        logger.exception(f"Task execution failed for action {action}: {e}")
+        # Re-raise to let Celery handle retry logic
+        raise
 
     elapsed = time.time() - start_time
     logger.info("end {} elapsed: {}".format(action, elapsed))
@@ -115,9 +119,16 @@ def domain_task_sync(options):
         update = {"$set": {"sync_status": TaskSyncStatus.DEFAULT}}
         utils.conn_db('task').update_one(query, update)
     except Exception as e:
-        update = {"$set": {"sync_status": TaskSyncStatus.ERROR}}
-        utils.conn_db('task').update_one(query, update)
-        logger.exception(e)
+        # Log full error with traceback - critical for debugging
+        logger.exception(f"Domain task sync failed for task_id={task_id}: {e}")
+        # Try to mark task as failed, but don't let this mask the original error
+        try:
+            update = {"$set": {"sync_status": TaskSyncStatus.ERROR}}
+            utils.conn_db('task').update_one(query, update)
+        except Exception as update_error:
+            logger.error(f"Failed to update task status to ERROR: {update_error}", exc_info=True)
+        # Re-raise to trigger Celery retry mechanism
+        raise
 
 
 def domain_task(options):

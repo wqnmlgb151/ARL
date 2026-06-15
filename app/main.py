@@ -147,16 +147,6 @@ def init_app(config_path: str = None) -> None:
         except Exception as e:
             logger.warning(f"Rate limiter initialization failed: {e}")
 
-    # 初始化插件系统（可选）
-    try:
-        from app.plugins.manager import plugin_manager
-        plugin_manager.load_all_plugins()
-        plugin_manager.register_all(arl_app)
-        stats = plugin_manager.get_stats()
-        logger.info(f"Plugins loaded: {stats['enabled']}/{stats['total']}")
-    except Exception as e:
-        logger.warning(f"Plugin system initialization failed: {e}")
-
     # 执行ARL更新
     arl_update()
     
@@ -207,17 +197,6 @@ def _print_optimization_status() -> None:
 # 注册安全响应头中间件（使用新的 middleware 模块）
 init_security_headers(arl_app)
 
-# 注册速率限制中间件（可选，通过环境变量控制）
-if os.getenv('ENABLE_RATE_LIMIT', 'false').lower() == 'true':
-    init_limiter(arl_app)
-    logger.info("Rate limiting enabled")
-else:
-    logger.info("Rate limiting disabled (set ENABLE_RATE_LIMIT=true to enable)")
-
-# 注册性能监控中间件
-arl_app.after_request(after_request_metrics)
-
-
 # 注册性能监控中间件
 @arl_app.before_request
 def before_request():
@@ -245,8 +224,14 @@ def after_request_metrics(response):
 
 
 if __name__ == '__main__':
+    # Windows 编码修复（仅开发服务器需要）
+    if sys.platform == 'win32':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
     # 开发环境配置
-    debug_mode = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     port = int(os.environ.get('FLASK_PORT', 5018))
     host = os.environ.get('FLASK_HOST', '127.0.0.1')
 

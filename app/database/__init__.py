@@ -5,6 +5,6 @@ ARL数据库模块
 """
 
 from app.database.connection import DatabaseManager, get_collection, get_db, init_db
-from app.database.base_repository import BaseRepository
+from app.database.repositories import BaseRepository
 
 __all__ = ['DatabaseManager', 'get_collection', 'get_db', 'init_db', 'BaseRepository']

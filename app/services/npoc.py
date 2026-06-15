@@ -1,13 +1,24 @@
 import os
 import json
-from xing.core import PluginType, PluginRunner
-from xing.utils import load_plugins
-from xing.conf import Conf as npoc_conf
 from app import utils
 from app.modules import PoCCategory
 from app.config import Config
 
 logger = utils.get_logger()
+
+# xing (ARL-NPoC) 是可选依赖，仅在 PoC 扫描时需要
+_xing_imports = None
+
+
+def _ensure_xing():
+    """惰性导入 xing 模块（可选依赖）"""
+    global _xing_imports
+    if _xing_imports is None:
+        from xing.core import PluginType as _PluginType, PluginRunner as _PluginRunner
+        from xing.utils import load_plugins as _load_plugins
+        from xing.conf import Conf as _npoc_conf
+        _xing_imports = (_PluginType, _PluginRunner, _load_plugins, _npoc_conf)
+    return _xing_imports
 
 
 class NPoC(object):
@@ -44,7 +55,7 @@ class NPoC(object):
         """ 数据库中插件名称列表 """
         if self._db_plugin_name_list is None:
             self._db_plugin_name_list = []
-            for item in utils.conn_db('poc').find({}):
+            for item in utils.conn_db('poc').find({}, {"plugin_name": 1}):
                 self._db_plugin_name_list.append(item["plugin_name"])
 
         return self._db_plugin_name_list
@@ -66,6 +77,7 @@ class NPoC(object):
         return self._poc_info_list
 
     def load_all_poc(self):
+        PluginType, _, load_plugins, npoc_conf = _ensure_xing()
         plugins = load_plugins(os.path.join(npoc_conf.PROJECT_DIRECTORY, "plugins"))
         pocs = []
         for plugin in plugins:
@@ -81,6 +93,7 @@ class NPoC(object):
         return pocs
 
     def gen_poc_info(self):
+        PluginType, _, _, _ = _ensure_xing()
         info_list = []
         for p in self.plugins:
             info = dict()
@@ -135,6 +148,7 @@ class NPoC(object):
         return True
 
     def run_poc(self, plugin_name_list, targets):
+        _, PluginRunner, _, npoc_conf = _ensure_xing()
         self.result = []
         npoc_conf.SAVE_TEXT_RESULT_FILENAME = ""
         random_file = os.path.join(self.tmp_dir, "npoc_result_{}.txt".format(utils.random_choices()))

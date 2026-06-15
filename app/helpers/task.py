@@ -143,6 +143,8 @@ def submit_task(task_data):
         utils.conn_db('task').update_one({"_id": bson.ObjectId(task_id)}, values)
 
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
         utils.conn_db('task').delete_one({"_id": bson.ObjectId(task_id), "status": TaskStatus.WAITING})
         logger.info("下发失败 {}".format(target))
         raise e

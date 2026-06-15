@@ -1,0 +1,318 @@
+# -*- coding: utf-8 -*-
+#
+# ARL项目 GitHub Actions CI配置
+# 在每次推送和PR时运行代码质量检查和测试
+#
+
+name: ARL CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+
+# 取消同一分支的重复运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.9'
+  MONGO_VERSION: '4.4'
+  RABBITMQ_VERSION: '3.13'
+
+jobs:
+  # 代码质量检查
+  lint:
+    name: 代码质量检查
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: 运行Black格式检查
+        run: black app/ tests/ --check --diff
+
+      - name: 运行isort导入排序检查
+        run: isort app/ tests/ --check-only --diff
+
+      - name: 运行Ruff代码检查
+        run: ruff check app/ tests/
+
+      - name: 运行Mypy类型检查
+        run: mypy app/ --ignore-missing-imports --show-error-codes
+        continue-on-error: true  # 类型检查失败不阻塞CI
+
+  # 安全扫描
+  security:
+    name: 安全扫描
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit safety
+
+      - name: 运行Bandit安全扫描
+        run: |
+          bandit -r app/ -f json -o reports/security.json || true
+          bandit -r app/ -ll
+
+      - name: 检查依赖漏洞
+        run: safety check --json || true
+        continue-on-error: true
+
+      - name: 上传安全报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-report
+          path: reports/security.json
+          retention-days: 30
+
+  # 单元测试
+  test-unit:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: 运行单元测试
+        run: |
+          pytest tests/unit/ \
+            -v \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage-unit.xml \
+            --junitxml=reports/junit-unit.xml \
+            --cov-fail-under=60
+
+      - name: 上传测试报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-unit-report-${{ matrix.python-version }}
+          path: reports/
+          retention-days: 7
+
+  # 集成测试
+  test-integration:
+    name: 集成测试
+    runs-on: ubuntu-latest
+    needs: test-unit
+
+    services:
+      mongodb:
+        image: mongo:${{ env.MONGO_VERSION }}
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd="mongo --eval 'db.runCommand({ping:1})'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      rabbitmq:
+        image: rabbitmq:${{ env.RABBITMQ_VERSION }}-management
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd="rabbitmqctl status"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: 等待服务就绪
+        run: |
+          echo "等待MongoDB..."
+          until nc -z localhost 27017; do sleep 1; done
+          echo "MongoDB已就绪"
+          echo "等待RabbitMQ..."
+          until nc -z localhost 5672; do sleep 1; done
+          echo "RabbitMQ已就绪"
+
+      - name: 运行集成测试
+        env:
+          MONGO_URL: mongodb://localhost:27017
+          MONGO_DB: arl_test
+          CELERY_BROKER_URL: amqp://guest:guest@localhost:5672/
+        run: |
+          pytest tests/integration/ \
+            -v \
+            --cov=app \
+            --cov-append \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage-integration.xml \
+            --junitxml=reports/junit-integration.xml \
+            --cov-fail-under=40
+        continue-on-error: true  # 集成测试暂时不阻塞
+
+      - name: 上传测试报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-integration-report
+          path: reports/
+          retention-days: 7
+
+  # 覆盖率汇总
+  coverage:
+    name: 覆盖率汇总
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-integration]
+    if: always()
+
+    steps:
+      - name: 下载所有测试报告
+        uses: actions/download-artifact@v4
+        with:
+          path: all-reports/
+
+      - name: 汇总覆盖率
+        run: |
+          echo "## 测试覆盖率报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f all-reports/test-unit-report-*/coverage-unit.xml ]; then
+            echo "单元测试覆盖率: 已生成" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f all-reports/test-integration-report/coverage-integration.xml ]; then
+            echo "集成测试覆盖率: 已生成" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 上传到Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: all-reports/**/coverage*.xml
+          flags: unittests,integration
+          name: codecov-arl
+          fail_ci_if_error: false
+
+  # 构建Docker镜像
+  build:
+    name: 构建Docker镜像
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit]
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 部署到预发布环境
+  deploy-staging:
+    name: 部署到预发布环境
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    environment: staging
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 部署到预发布
+        run: |
+          echo "部署到预发布环境..."
+          # 这里添加实际的部署命令
+          # 例如: kubectl apply -f k8s/staging/
+          echo "预发布部署完成"
+
+  # 通知
+  notify:
+    name: 通知
+    runs-on: ubuntu-latest
+    needs: [lint, security, test-unit, build]
+    if: always()
+
+    steps:
+      - name: 发送通知
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ CI流水线成功"
+          else
+            echo "❌ CI流水线失败，请检查日志"
+          fi

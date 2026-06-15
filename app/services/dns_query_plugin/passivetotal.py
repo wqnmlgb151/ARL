@@ -24,6 +24,8 @@ class Query(DNSQueryBase):
                                                                    quota, count, limit, self.auth_email))
 
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             if "'user'" == str(e):
                 raise Exception("{} api auth error ({}, {})".format(self.source_name, self.auth_email, self.auth_key))
             raise

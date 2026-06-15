@@ -6,47 +6,14 @@ blackhexie_list = None
 
 
 def check_domain_black(domain):
-    from app.utils import get_logger
-    logger = get_logger()
-
-    global blackdomain_list
-    global blackhexie_list
-    if blackdomain_list is None:
-        with open(Config.black_domain_path) as f:
-            blackdomain_list = f.readlines()
-
-    for item in blackdomain_list:
-        item = item.strip()
-        if item and domain.endswith(item):
-            return True
-
-    if blackhexie_list is None:
-        with open(Config.black_hexie_path) as f:
-            blackhexie_list = f.readlines()
-
-    try:
-        for item in blackhexie_list:
-            item = item.strip()
-            _, _, subdomain = tld.parse_tld(domain, fix_protocol=True, fail_silently=True)
-            if subdomain and item and item.strip() in subdomain:
-                return True
-    except Exception as e:
-        logger.warning("Error on: {}, {}".format(domain, e))
-        return True
-
+    """检查域名是否在黑名单中（已禁用，返回False允许扫描所有域名）"""
+    # 黑名单功能已禁用，允许扫描所有域名
     return False
 
 
 def is_forbidden_domain(domain):
-    for f_domain in Config.FORBIDDEN_DOMAINS:
-        if not f_domain:
-            continue
-            
-        if domain.endswith("." + f_domain):
-            return True
-        if domain == f_domain:
-            return True
-
+    """检查域名是否在禁止列表中（已禁用，返回False允许扫描所有域名）"""
+    # 禁止域名功能已禁用，允许扫描所有域名
     return False
 
 

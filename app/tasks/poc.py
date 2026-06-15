@@ -201,6 +201,8 @@ class RiskCruising(CommonTask):
             self.work()
             self.update_task_field("status", TaskStatus.DONE)
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             self.update_task_field("status", TaskStatus.ERROR)
             logger.exception(e)
 

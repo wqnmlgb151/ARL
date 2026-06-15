@@ -182,6 +182,8 @@ class UploadARLFinger(ARLResource):
             return utils.build_ret(ErrorMsg.Success, {'error_cnt': error_cnt,
                                                       'repeat_cnt': repeat_cnt,'success_cnt': success_cnt})
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             return utils.build_ret(ErrorMsg.Error, {'msg': str(e)})
 
 

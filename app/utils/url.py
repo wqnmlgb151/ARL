@@ -141,6 +141,9 @@ def verify_cert(url):
         http_req(url, method='head', verify= True)
         return True
     except Exception as e:
+        # Log debug level - this is expected for invalid URLs
+        import logging
+        logging.getLogger(__name__).debug(f"URL validation failed for {url}: {e}")
         return False
 
 

@@ -43,6 +43,8 @@ class TaskFofaTest(ARLResource):
             }
             return build_ret(ErrorMsg.Success, item)
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error in {__name__}: {e}")
             error_msg = str(e)
             error_msg = error_msg.replace(Config.FOFA_KEY[10:], "***")
             return build_ret(ErrorMsg.FofaConnectError, {'error':error_msg})
