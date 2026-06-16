@@ -24,7 +24,7 @@ FOFA:
 
 
 # 利用三方API进行域名收集
-# 测试命令 python3.6 -m test.test_query_plugin [source1] [source2]
+# 域名查询插件数据源Token 配置
 # 域名查询插件配置, enable 字段可以单独控制是否启用该插件，如果没有这个字段也会默认启用
 QUERY_PLUGIN:
   alienvault:
@@ -101,8 +101,7 @@ WXWORK:
 # 监控任务 WEBHOOK 配置
 # IP/域名监控和站点监控结束后会往下面的URL POST提交JSON数据
 # 为了验证身份会在Header中带上Token 字段
-# 进入容器测试  docker compose exec worker bash
-# 测试命令 python3.6 -m test.test_webhook <task_id> <scope_id>
+# WebHook 文档: https://tophanttechnology.github.io/ARL-doc/config_option/#webhook
 WEBHOOK:
   URL: ""
   TOKEN: ""
